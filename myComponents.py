@@ -163,55 +163,63 @@ class SwitchPort(object):
         self.topic_tree = tp.TopicTree()
         self.sending_tree = tp.TopicTree()
 
-
     def run(self):
         while True:
             msg = (yield self.store.get())
             self.busy = 1
             self.byte_size -= msg.size
-            self.bytes_sent += msg.size
-            self.packets_sent += 1
+
             yield self.env.timeout(msg.size / self.rate)
 
-            self.outbound(msg)
+            yield self.env.process(self.inbound(msg))
+
+            yield self.env.process(self.outbound(msg))
 
             self.busy = 0
+
             if self.debug:
                 print(msg)
 
     def outbound(self, msg):
+        outbound_delay = 0
         if SwitchPort.mode == 'PF':
             if msg.pkt_type == 'sub':
                 pass
             elif msg.pkt_type == 'pub':
                 for out in self.outs:
                     if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-1]:
+                        # flood to all neighbour brokers
                         msg_copy = copy.deepcopy(msg)
                         msg_copy.trace.append(self.sp_id)
                         out.put(msg_copy)
+                        self.packets_sent += 1
+                        self.bytes_sent += msg.size
+
                     elif isinstance(out, Client) and out.client_id != msg.trace[-1]:
                         # send message to interested client
                         target_nodes, delay = self.topic_tree.match_branch(msg.topic)
-                        # yield self.env.timeout(delay)
+                        outbound_delay += delay
                         for node in target_nodes:
                             # if target_node is not None:
                             if out.client_id in node.broker_ids:
                                 msg_copy = copy.deepcopy(msg)
                                 msg_copy.trace.append(self.sp_id)
                                 out.put(msg_copy)
+                                self.packets_sent += 1
+                                self.bytes_sent += msg.size
                                 break
-            else:
-                raise Exception(msg.pkt_type + " unknown packet type")
+            yield self.env.timeout(outbound_delay)
         elif SwitchPort.mode == 'SF':
             if msg.pkt_type == 'sub':
                 for out in self.outs:
                     if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-1]:
+                        # flood to all neighbour brokers
                         msg_copy = copy.deepcopy(msg)
                         msg_copy.trace.append(self.sp_id)
                         out.put(msg_copy)
             elif msg.pkt_type == 'pub':
-                target_nodes, delay = self.topic_tree.match_branch(msg.topic)
-                # yield self.env.timeout(delay)
+                target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
+                outbound_delay += match_branch_delay
                 for out in self.outs:
                     if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-1]:
                         for node in target_nodes:
@@ -219,18 +227,24 @@ class SwitchPort(object):
                                 msg_copy = copy.deepcopy(msg)
                                 msg_copy.trace.append(self.sp_id)
                                 out.put(msg_copy)
+                                self.packets_sent += 1
+                                self.bytes_sent += msg.size
                                 break
+
                     elif isinstance(out, Client) and out.client_id != msg.trace[-1]:
                         for node in target_nodes:
                             if out.client_id in node.broker_ids:
                                 msg_copy = copy.deepcopy(msg)
                                 msg_copy.trace.append(self.sp_id)
                                 out.put(msg_copy)
+                                self.packets_sent += 1
+                                self.bytes_sent += msg.size
                                 break
+            yield self.env.timeout(outbound_delay)
         elif SwitchPort.mode == 'SSF':
             if msg.pkt_type == 'sub':
-                subscribed_nodes, delay = self.sending_tree.match_branch(msg.topic)
-                # yield self.env.timeout(delay)
+                subscribed_nodes, match_branch_delay = self.sending_tree.match_branch(msg.topic)
+                outbound_delay += match_branch_delay
                 flooding_group = []
                 for out in self.outs:
                     if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-1]:
@@ -243,16 +257,18 @@ class SwitchPort(object):
                             # add necessary broker into flood group
                             flooding_group.append(out)
                             # update sending tree
-                            delay = self.sending_tree.add_branch(msg.topic, out.sp_id)
-                            # yield self.env.timeout(delay)
+                            add_branch_delay = self.sending_tree.add_branch(msg.topic, out.sp_id)
+                            outbound_delay += add_branch_delay
                 # do flood
                 for out in flooding_group:
                     msg_copy = copy.deepcopy(msg)
                     msg_copy.trace.append(self.sp_id)
                     out.put(msg_copy)
+                    self.packets_sent += 1
+                    self.bytes_sent += msg.size
             elif msg.pkt_type == 'pub':
-                target_nodes, delay = self.topic_tree.match_branch(msg.topic)
-                # yield self.env.timeout(delay)
+                target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
+                outbound_delay += match_branch_delay
                 for out in self.outs:
                     if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-1]:
                         for node in target_nodes:
@@ -260,6 +276,8 @@ class SwitchPort(object):
                                 msg_copy = copy.deepcopy(msg)
                                 msg_copy.trace.append(self.sp_id)
                                 out.put(msg_copy)
+                                self.packets_sent += 1
+                                self.bytes_sent += msg.size
                                 break
                     elif isinstance(out, Client) and out.client_id != msg.trace[-1]:
                         for node in target_nodes:
@@ -267,7 +285,10 @@ class SwitchPort(object):
                                 msg_copy = copy.deepcopy(msg)
                                 msg_copy.trace.append(self.sp_id)
                                 out.put(msg_copy)
+                                self.packets_sent += 1
+                                self.bytes_sent += msg.size
                                 break
+            yield self.env.timeout(outbound_delay)
         else:
             raise Exception(SwitchPort.mode + " unknown flooding mode")
 
@@ -279,7 +300,7 @@ class SwitchPort(object):
             self.byte_size = tmp_byte_count
             # return self.store.put(pkt)
             self.bytes_rec += pkt.size
-            return self.inbound(pkt)
+            return self.store.put(pkt)
         if self.limit_bytes and tmp_byte_count >= self.qlimit:
             self.packets_drop += 1
             return
@@ -289,38 +310,31 @@ class SwitchPort(object):
             self.byte_size = tmp_byte_count
             # return self.store.put(pkt)
             self.bytes_rec += pkt.size
-            return self.inbound(pkt)
+            return self.store.put(pkt)
 
     def inbound(self, pkt):
+        inbound_delay = 0
         if SwitchPort.mode == 'PF':
             if pkt.pkt_type == 'sub':
                 last_hop = pkt.trace[-1]
                 # add interests
-                delay = self.topic_tree.add_branch(pkt.topic, last_hop)
-                # yield self.env.timeout(delay)
-                return self.store.put(pkt)
-            elif pkt.pkt_type == 'pub':
-                return self.store.put(pkt)
-            else:
-                raise Exception(pkt.pkt_type + " unknown packet type")
+                add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
+                inbound_delay += add_branch_delay
+            yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SF':
             if pkt.pkt_type == 'sub':
                 last_hop = pkt.trace[-1]
                 # add interests
-                delay = self.topic_tree.add_branch(pkt.topic, last_hop)
-                # yield self.env.timeout(delay)
-                return self.store.put(pkt)
-            elif pkt.pkt_type == 'pub':
-                return self.store.put(pkt)
+                add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
+                inbound_delay += add_branch_delay
+            yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SSF':
             if pkt.pkt_type == 'sub':
                 last_hop = pkt.trace[-1]
                 # add interests
-                delay = self.topic_tree.add_branch(pkt.topic, last_hop)
-                # yield self.env.timeout(delay)
-                return self.store.put(pkt)
-            elif pkt.pkt_type == 'pub':
-                return self.store.put(pkt)
+                add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
+                inbound_delay += add_branch_delay
+            yield self.env.timeout(inbound_delay)
         else:
             raise Exception(SwitchPort.mode + " unknown flooding mode")
 
@@ -396,15 +410,15 @@ class ClientMonitor(object):
         while True:
             yield self.env.timeout(self.dist())
             self.packets_rec.append(self.client.packets_rec)
-            #wait = None
-            #if self.client.packets_rec != 0:
+            # wait = None
+            # if self.client.packets_rec != 0:
             wait = sum(self.client.waits)
             self.tot_waits.append(wait)
 
 
 class Network(object):
     # total_topic is TopicTree
-    def __init__(self, total_topic:tp.TopicTree, avg_sub_size, avg_pub_size, qlimit=None):
+    def __init__(self, total_topic: tp.TopicTree, avg_sub_size, avg_pub_size, qlimit=None):
 
         self.env = simpy.Environment()
         self.broker_list = []
@@ -529,7 +543,7 @@ class Network(object):
         G.add_nodes_from(pub_nodes)
 
         for id1, id2 in self.edge_set:
-            broker_connections.append((self.broker_list[id1-1].sp_id, self.broker_list[id2-1].sp_id))
+            broker_connections.append((self.broker_list[id1 - 1].sp_id, self.broker_list[id2 - 1].sp_id))
         for sub in self.sub_list:
             sub_connections.append((sub.client_id, sub.out.sp_id))
         for pub in self.pub_list:
@@ -548,7 +562,6 @@ def constarrival(t):
 
 
 def get_edges(m, seed=None):
-
     np.random.seed(seed)
 
     edge_set = []

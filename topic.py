@@ -33,7 +33,7 @@ class TopicTree(object):
         self.transmission_delay = None
 
     def add_branch(self, topic, broker_id=None):
-        # add broker id to topic, is topic not exist add topic to topic tree
+        # add broker id to topic, if topic not exist add topic to topic tree
         name_list = str.split(topic, '/')
         parent = self.root
         for name in name_list:
@@ -48,14 +48,13 @@ class TopicTree(object):
         if broker_id:
             if broker_id not in parent.broker_ids:
                 parent.broker_ids.append(broker_id)
-        delay = 1
+        delay = 0.01
         return delay
 
     def match_branch(self, topic):
         # return list of nodes, matches all nodes that contains input topic
         name_list = str.split(topic, '/')
         parent_list = [self.root]
-
         result = []
         for name in name_list:
             # get next layer parent and update result when encounter #
@@ -70,7 +69,7 @@ class TopicTree(object):
                         children.append(child)
             parent_list = children
         result += parent_list
-        delay = 1
+        delay = 0.01
         return result, delay
 
     def visualize(self):
