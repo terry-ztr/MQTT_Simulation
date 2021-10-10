@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import time
 
 class Packet(object):
+
     """ A very simple class that represents a packet.
         This packet will run through a queue at a switch output port.
         We use a float to represent the size of the packet in bytes so that
@@ -165,15 +166,28 @@ class SwitchPort(object):
 
     def run(self):
         while True:
+            delay_unit = 500
             msg = (yield self.store.get())
             self.busy = 1
             self.byte_size -= msg.size
 
             yield self.env.timeout(msg.size / self.rate)
-            yield self.env.process(self.inbound(msg))
+
+            # yield self.env.process(self.inbound(msg))
+            start_time = time.time()
+            self.inbound(msg)
+            inbound_delay = (time.time()-start_time)*delay_unit
+            yield self.env.timeout(inbound_delay)
+            # print(inbound_delay)
+
             msg_copy = copy.deepcopy(msg)
             msg_copy.trace.append(self.sp_id)
-            yield self.env.process(self.outbound(msg_copy))
+            # yield self.env.process(self.outbound(msg_copy))
+            start_time = time.time()
+            self.outbound(msg_copy)
+            outbound_delay = (time.time()-start_time)*delay_unit
+            yield self.env.timeout(outbound_delay)
+            # print(outbound_delay)
 
             self.busy = 0
 
@@ -207,7 +221,7 @@ class SwitchPort(object):
                                 self.packets_sent += 1
                                 self.bytes_sent += msg.size
                                 break
-            yield self.env.timeout(outbound_delay)
+            # yield self.env.timeout(outbound_delay)
         elif SwitchPort.mode == 'SF':
             if msg.pkt_type == 'sub':
                 for out in self.outs:
@@ -239,7 +253,7 @@ class SwitchPort(object):
                                 self.packets_sent += 1
                                 self.bytes_sent += msg.size
                                 break
-            yield self.env.timeout(outbound_delay)
+            # yield self.env.timeout(outbound_delay)
         elif SwitchPort.mode == 'SSF':
             if msg.pkt_type == 'sub':
                 subscribed_nodes, match_branch_delay = self.sending_tree.match_branch(msg.topic)
@@ -287,7 +301,7 @@ class SwitchPort(object):
                                 self.packets_sent += 1
                                 self.bytes_sent += msg.size
                                 break
-            yield self.env.timeout(outbound_delay)
+            # yield self.env.timeout(outbound_delay)
         else:
             raise Exception(SwitchPort.mode + " unknown flooding mode")
 
@@ -319,21 +333,21 @@ class SwitchPort(object):
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
-            yield self.env.timeout(inbound_delay)
+            # yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SF':
             if pkt.pkt_type == 'sub':
                 last_hop = pkt.trace[-1]
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
-            yield self.env.timeout(inbound_delay)
+            # yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SSF':
             if pkt.pkt_type == 'sub':
                 last_hop = pkt.trace[-1]
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
-            yield self.env.timeout(inbound_delay)
+            # yield self.env.timeout(inbound_delay)
         else:
             raise Exception(SwitchPort.mode + " unknown flooding mode")
 
@@ -434,7 +448,7 @@ class Network(object):
 
         # construct broker list
 
-    def initialize_nodes(self, broker_rates, sub_rates, pub_rates, monitor_rate, seed=None):
+    def initialize_nodes(self, broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic, pub_diameter, monitor_rate, seed=None):
 
         if seed is not None:
             random.seed(seed)
@@ -458,7 +472,9 @@ class Network(object):
             # set subscriber interested topic
             # num_topic = random.randint(1, len(self.total_topic))
             # topic_list = random.sample(self.total_topic, num_topic)
-            topic_list = tp.get_topic_random(self.total_topic)
+
+            topic_list = self.total_topic.get_topic_within_distance(sub_num_topic[i], sub_diameter[i])
+            topic_list = self.total_topic.make_wild(topic_list)
             sub = Client(self.env, adist=sub_adist, sdist=sub_sdist, client_type='sub', client_id=sub_id,
                          topic_list=topic_list)
             sub_monitor = ClientMonitor(self.env, sub, mdist)
@@ -473,7 +489,8 @@ class Network(object):
             # set publisher interested topic
             # num_topic = random.randint(1, len(self.total_topic))
             # topic_list = random.sample(self.total_topic, num_topic)
-            topic_list = tp.get_topic_random(self.total_topic, wild=False)
+
+            topic_list = self.total_topic.get_topic_within_distance(pub_num_topic[i], pub_diameter[i])
             pub = Client(self.env, adist=pub_adist, sdist=pub_sdist, client_type='pub', client_id=pub_id,
                          topic_list=topic_list)
             pub_monitor = ClientMonitor(self.env, pub, mdist)
