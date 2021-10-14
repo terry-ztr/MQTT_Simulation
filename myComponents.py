@@ -506,7 +506,6 @@ class Network(object):
             broker2 = self.broker_list[id2 - 1]
             broker1.outs.append(broker2)
             broker2.outs.append(broker1)
-
     def connect_client(self, connection_style=None, seed=None):
 
         if seed is not None:

@@ -188,7 +188,7 @@ def node_to_str(node):
 
 
 # at most add one + and one #
-def add_wildcard(topic_str, wildcard_rate=0.5, plus_rate=0.9, hash_rate=0.8, ):
+def add_wildcard(topic_str, wildcard_rate=0.5, plus_rate=0.9, hash_rate=0.8):
     if random.uniform(0, 1) < wildcard_rate:  # add wildcard
         name_list = str.split(topic_str, '/')
         if random.uniform(0, 1) < plus_rate:
