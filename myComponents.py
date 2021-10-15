@@ -38,15 +38,16 @@ class Packet(object):
         self.id = id
         self.src = src
         # list of sp_id, travel path of the packet
-        self.trace = []
+        self.trace_last = None
+        self.trace_second_last = None
 
         self.topic = topic
         # pkt_type: pub sub
         self.pkt_type = pkt_type
 
     def __repr__(self):
-        return "id: {}, src: {}, trace: {}, time: {}, size: {}, topic:{}, pkt_type:{}". \
-            format(self.id, self.src, self.trace, self.time, self.size, self.topic, self.pkt_type)
+        return "id: {}, src: {}, time: {}, size: {}, topic:{}, pkt_type:{}". \
+            format(self.id, self.src, self.time, self.size, self.topic, self.pkt_type)
 
 
 class Client(object):
@@ -106,15 +107,15 @@ class Client(object):
             topic = self.topic_list[random.randint(0, len(self.topic_list)) - 1]
             p = Packet(self.env.now, self.sdist(), self.packets_sent, pkt_type=self.client_type, topic=topic,
                        src=self.client_id)
-            p.trace.append(self.client_id)
+            #p.trace.append(self.client_id)
+            p.trace_second_last = p.trace_last
+            p.trace_last = self.client_id
             self.packets_sent += 1
             self.bytes_sent += p.size
             self.out.put(p)
 
     def put(self, pkt):
         self.waits += (self.env.now - pkt.time)
-        # self.arrivals.append(now - self.last_arrival)
-        # self.last_arrival = now
         self.packets_rec += 1
         self.bytes_rec += pkt.size
         if self.debug:
@@ -181,8 +182,9 @@ class SwitchPort(object):
             # print(inbound_delay)
 
             msg_copy = copy.deepcopy(msg)
-            msg_copy.trace.append(self.sp_id)
-            # yield self.env.process(self.outbound(msg_copy))
+            #msg_copy.trace.append(self.sp_id)
+            msg_copy.trace_second_last = msg_copy.trace_last
+            msg_copy.trace_last = self.sp_id
             start_time = time.time()
             self.outbound(msg_copy)
             outbound_delay = (time.time()-start_time)*delay_unit
@@ -201,7 +203,7 @@ class SwitchPort(object):
                 pass
             elif msg.pkt_type == 'pub':
                 for out in self.outs:
-                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-2]:
+                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace_second_last:
                         # flood to all neighbour brokers
                         # msg_copy = copy.deepcopy(msg)
                         # msg_copy.trace.append(self.sp_id)
@@ -209,7 +211,7 @@ class SwitchPort(object):
                         self.packets_sent += 1
                         self.bytes_sent += msg.size
 
-                    elif isinstance(out, Client) and out.client_id != msg.trace[-2]:
+                    elif isinstance(out, Client) and out.client_id != msg.trace_second_last:
                         # send message to interested client
                         target_nodes, delay = self.topic_tree.match_branch(msg.topic)
                         for node in target_nodes:
@@ -225,7 +227,7 @@ class SwitchPort(object):
         elif SwitchPort.mode == 'SF':
             if msg.pkt_type == 'sub':
                 for out in self.outs:
-                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-2]:
+                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace_second_last:
                         # flood to all neighbour brokers
                         # msg_copy = copy.deepcopy(msg)
                         # msg_copy.trace.append(self.sp_id)
@@ -238,7 +240,7 @@ class SwitchPort(object):
                 target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
                 outbound_delay += match_branch_delay
                 for out in self.outs:
-                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-2]:
+                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace_second_last:
                         for node in target_nodes:
                             if out.sp_id in node.broker_ids:
                                 # msg_copy = copy.deepcopy(msg)
@@ -248,7 +250,7 @@ class SwitchPort(object):
                                 self.bytes_sent += msg.size
                                 break
 
-                    elif isinstance(out, Client) and out.client_id != msg.trace[-2]:
+                    elif isinstance(out, Client) and out.client_id != msg.trace_second_last:
                         for node in target_nodes:
                             if out.client_id in node.broker_ids:
                                 # msg_copy = copy.deepcopy(msg)
@@ -264,7 +266,7 @@ class SwitchPort(object):
                 outbound_delay += match_branch_delay
                 flooding_group = []
                 for out in self.outs:
-                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-2]:
+                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace_second_last:
                         is_necessary = True
                         for node in subscribed_nodes:
                             if out.sp_id in node.broker_ids:
@@ -287,7 +289,7 @@ class SwitchPort(object):
                 target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
                 outbound_delay += match_branch_delay
                 for out in self.outs:
-                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace[-2]:
+                    if isinstance(out, SwitchPort) and out.sp_id != msg.trace_second_last:
                         for node in target_nodes:
                             if out.sp_id in node.broker_ids:
                                 # msg_copy = copy.deepcopy(msg)
@@ -296,7 +298,7 @@ class SwitchPort(object):
                                 self.packets_sent += 1
                                 self.bytes_sent += msg.size
                                 break
-                    elif isinstance(out, Client) and out.client_id != msg.trace[-2]:
+                    elif isinstance(out, Client) and out.client_id != msg.trace_second_last:
                         for node in target_nodes:
                             if out.client_id in node.broker_ids:
                                 # msg_copy = copy.deepcopy(msg)
@@ -333,21 +335,21 @@ class SwitchPort(object):
         inbound_delay = 0
         if SwitchPort.mode == 'PF':
             if pkt.pkt_type == 'sub':
-                last_hop = pkt.trace[-1]
+                last_hop = pkt.trace_last
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
             # yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SF':
             if pkt.pkt_type == 'sub':
-                last_hop = pkt.trace[-1]
+                last_hop = pkt.trace_last
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
             # yield self.env.timeout(inbound_delay)
         elif SwitchPort.mode == 'SSF':
             if pkt.pkt_type == 'sub':
-                last_hop = pkt.trace[-1]
+                last_hop = pkt.trace_last
                 # add interests
                 add_branch_delay = self.topic_tree.add_branch(pkt.topic, last_hop)
                 inbound_delay += add_branch_delay
