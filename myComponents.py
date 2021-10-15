@@ -525,8 +525,10 @@ class Network(object):
 
         mdist = functools.partial(constarrival, monitor_rate)
 
-
+        print('initializing brokers')
         for i in range(len(broker_rates)):
+            if i%10 == 0:
+                print('broker_id: ', i+1)
             # sp id starts at sp1
             sp_id = 'sp' + str(i + 1)
             broker = SwitchPort(self.env, broker_rates[i], sp_id, qlimit=self.qlimit)
@@ -535,8 +537,11 @@ class Network(object):
             # self.broker_monitor_list.append(broker_monitor)
 
         # construct sub list
+        print('initializing sub')
         sub_sdist = functools.partial(random.expovariate, 1 / self.avg_sub_size)
         for i in range(len(sub_rates)):
+            if i%10 == 0:
+                print('sub_id: ', i+1)
             # sub id starts at sub1
             sub_id = 'sub' + str(i + 1)
             sub_adist = functools.partial(random.expovariate, sub_rates[i])
@@ -555,6 +560,8 @@ class Network(object):
         # construct pub list
         pub_sdist = functools.partial(random.expovariate, 1 / self.avg_pub_size)
         for i in range(len(pub_rates)):
+            if i%10 == 0:
+                print('pub_id: ', i+1)
             pub_id = 'pub' + str(i + 1)
             pub_adist = functools.partial(random.expovariate, pub_rates[i])
             # set publisher interested topic
