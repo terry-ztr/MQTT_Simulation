@@ -230,6 +230,10 @@ class SwitchPort(object):
                         # msg_copy = copy.deepcopy(msg)
                         # msg_copy.trace.append(self.sp_id)
                         out.put(msg)
+                        self.packets_sent += 1
+                        self.bytes_sent += msg.size
+                    
+
             elif msg.pkt_type == 'pub':
                 target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
                 outbound_delay += match_branch_delay
