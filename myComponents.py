@@ -145,6 +145,7 @@ class SwitchPort(object):
 
     """
     mode = "PF"
+    delay_unit = 500
 
     def __init__(self, env, rate, sp_id, qlimit=None, limit_bytes=True, debug=False):
         self.sp_id = sp_id
@@ -168,7 +169,7 @@ class SwitchPort(object):
 
     def run(self):
         while True:
-            delay_unit = 500
+
             msg = (yield self.store.get())
             self.busy = 1
             self.byte_size -= msg.size
@@ -178,7 +179,7 @@ class SwitchPort(object):
             # yield self.env.process(self.inbound(msg))
             start_time = time.time()
             self.inbound(msg)
-            inbound_delay = (time.time()-start_time)*delay_unit
+            inbound_delay = (time.time()-start_time)*SwitchPort.delay_unit
             yield self.env.timeout(inbound_delay)
             # print(inbound_delay)
 
@@ -188,7 +189,7 @@ class SwitchPort(object):
             msg_copy.trace_last = self.sp_id
             start_time = time.time()
             self.outbound(msg_copy)
-            outbound_delay = (time.time()-start_time)*delay_unit
+            outbound_delay = (time.time()-start_time)*SwitchPort.delay_unit
             yield self.env.timeout(outbound_delay)
             # print(outbound_delay)
 
