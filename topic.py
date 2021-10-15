@@ -117,7 +117,7 @@ class TopicTree(object):
         idx_list = [*range(len(self.all_nodes))]
         topic_str_list = []
         while len(topic_str_list) < num_topic and len(idx_list) > 0:
-            idx = random.sample(idx_list, 1)[0]
+            idx = random.choice(idx_list)
             idx_list.remove(idx)
             node_str = node_to_str(self.all_nodes[idx])
             conflict = False

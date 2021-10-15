@@ -9,6 +9,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import time
 import csv
+import os
 
 class Packet(object):
 
@@ -527,7 +528,7 @@ class Network(object):
 
         print('initializing brokers')
         for i in range(len(broker_rates)):
-            if i%10 == 0:
+            if i%100 == 0:
                 print('broker_id: ', i+1)
             # sp id starts at sp1
             sp_id = 'sp' + str(i + 1)
@@ -540,7 +541,7 @@ class Network(object):
         print('initializing sub')
         sub_sdist = functools.partial(random.expovariate, 1 / self.avg_sub_size)
         for i in range(len(sub_rates)):
-            if i%10 == 0:
+            if i%100 == 0:
                 print('sub_id: ', i+1)
             # sub id starts at sub1
             sub_id = 'sub' + str(i + 1)
@@ -560,7 +561,7 @@ class Network(object):
         # construct pub list
         pub_sdist = functools.partial(random.expovariate, 1 / self.avg_pub_size)
         for i in range(len(pub_rates)):
-            if i%10 == 0:
+            if i%100 == 0:
                 print('pub_id: ', i+1)
             pub_id = 'pub' + str(i + 1)
             pub_adist = functools.partial(random.expovariate, pub_rates[i])
@@ -736,14 +737,16 @@ def get_edges(m, seed=None):
 if __name__ == '__main__':
     # network parameter
     mode = 'PF'
-    num_broker = 10000
-    num_sub = 6000
+
+    num_broker = 1000
+    num_sub = 8000
     num_pub = 2000
-    broker_r = 500
+
+    broker_r = 300
     broker_rates = [broker_r] * num_broker
-    topic_dist = [10, 10, 5]
-    monitor_rate = 2
-    runtime = 20
+    topic_dist = [5, 5, 5, 5, 5]
+    monitor_rate = 1
+    runtime = 100
     connection_style = None
 
     # sub parameter
@@ -751,35 +754,47 @@ if __name__ == '__main__':
     sub_r = 3
 
     sub_rates = [sub_r] * num_sub
-    sub_num_topic = [20] * num_sub
-    sub_diameter = [20] * num_sub
+    sub_num_topic = [100] * num_sub
+    sub_diameter = [8] * num_sub
 
     # pub parameter
     avg_pub_size = 20.0
     pub_r = 3
 
     pub_rates = [pub_r] * num_pub
-    pub_num_topic = [10] * num_pub
-    pub_diameter = [len(topic_dist) * 2] * num_pub
+    pub_num_topic = [100] * num_pub
+    pub_diameter = [8] * num_pub
+
+    wildcard_rate = 1
+    plus_rate = 0
+    hash_rate = 0
 
     seed = 1
 
-    sub_file = open('sub.csv', 'w')
-    pub_file = open('pub.csv', 'w')
-    broker_file = open('broker.csv', 'w')
+    dir_name = str(num_broker) + '_' + str(num_sub) + '_' + str(num_pub) + '_' + str(sub_r) + '_' + str(
+        pub_r) + '_' + str(wildcard_rate * plus_rate) + '_' + str(wildcard_rate * hash_rate)
+    os.makedirs('../new_data/' + dir_name, exist_ok=True)
+
+    sub_waits = open('../new_data/' + dir_name + '/' + mode + '_' + 'sub_waits.csv', 'w')
+    sub_pkt = open('../new_data/' + dir_name + '/' + mode + '_' + 'sub_pkt.csv', 'w')
+    broker_queue = open('../new_data/' + dir_name + '/' + mode + '_' + 'broker_queue.csv', 'w')
+    broker_output = open('../new_data/' + dir_name + '/' + mode + '_' + 'broker_output.csv', 'w')
 
     SwitchPort.mode = mode
-    total_topic = tp.TopicTree()
+    total_topic = tp.TopicTree(wildcard_rate, plus_rate, hash_rate)
     total_topic.random_construct(topic_dist, seed)
     # total_topic.visualize(total_topic.root)
-    net = Network(total_topic, avg_sub_size, avg_pub_size, sub_file, pub_file, broker_file)
+    net = Network(total_topic, avg_sub_size, avg_pub_size, sub_waits, sub_pkt, broker_queue, broker_output,
+                     qlimit=None)
     net.initialize_nodes(broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic, pub_diameter,
                          monitor_rate, seed)
     net.establish_topology(seed)
     net.connect_client(connection_style, seed)
-    net.env.run(runtime)
-    #print(SwitchPort.mode)
+    print(SwitchPort.mode)
 
-    sub_file.close()
-    pub_file.close()
-    broker_file.close()
+    net.env.run(runtime)
+
+    sub_waits.close()
+    sub_pkt.close()
+    broker_queue.close()
+    broker_output.close()
