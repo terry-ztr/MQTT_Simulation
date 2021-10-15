@@ -8,6 +8,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import time
+import csv
 
 class Packet(object):
 
@@ -87,14 +88,14 @@ class Client(object):
         self.topic_list = topic_list
         # packet sink
         self.store = simpy.Store(env)
-        self.waits = []
-        self.arrivals = []
+        self.waits = 0
+        # self.arrivals = []
         self.debug = debug
         self.packets_rec = 0
         self.bytes_rec = 0
         self.packets_sent = 0
         self.bytes_sent = 0
-        self.last_arrival = 0.0
+        # self.last_arrival = 0.0
 
     def run(self):
         """The generator function used in simulations.
@@ -111,10 +112,9 @@ class Client(object):
             self.out.put(p)
 
     def put(self, pkt):
-        now = self.env.now
-        self.waits.append(self.env.now - pkt.time)
-        self.arrivals.append(now - self.last_arrival)
-        self.last_arrival = now
+        self.waits += (self.env.now - pkt.time)
+        # self.arrivals.append(now - self.last_arrival)
+        # self.last_arrival = now
         self.packets_rec += 1
         self.bytes_rec += pkt.size
         if self.debug:
@@ -423,15 +423,73 @@ class ClientMonitor(object):
         while True:
             yield self.env.timeout(self.dist())
             self.packets_rec.append(self.client.packets_rec)
-            # wait = None
-            # if self.client.packets_rec != 0:
-            wait = sum(self.client.waits)
+            wait = self.client.waits
             self.tot_waits.append(wait)
+
+
+class timeMonitor(object):
+
+    def __init__(self, env):
+        self.env = env
+        self.time = 0
+        self.action = env.process(self.run())
+
+    def run(self):
+        while True:
+            yield self.env.timeout(10)
+            self.time = self.env.now
+            print(self.time)
+
+class rowMonitor(object):
+
+    def __init__(self, env, sub_list, pub_list, broker_list, sub_waits, sub_pkt, broker_queue, broker_output, dist):
+        self.sub_list = sub_list
+        self.pub_list = pub_list
+        self.broker_list = broker_list
+        self.sub_waits = sub_waits
+        self.sub_pkt = sub_pkt
+        self.broker_queue = broker_queue
+        self.broker_output = broker_output
+        self.env = env
+        self.dist = dist
+
+        self.action = env.process(self.run())
+
+    def run(self):
+        while True:
+            yield self.env.timeout(self.dist())
+            if self.env.now % 5 == 0:
+                print('current time: ', self.env.now)
+            sub_wait = []
+            sub_pkt = []
+            broker_queue_size = []
+            broker_output_bytes = []
+            for sub in self.sub_list:
+                sub_wait.append(sub.waits)
+                sub_pkt.append(sub.packets_rec)
+                #interval_wait = sub.waits
+                #interval_pkt = sub.packets_rec
+                #if interval_pkt == 0:
+                #    wait_per_pkt = None
+                #else:
+                #    wait_per_pkt = interval_wait/interval_pkt
+                #sub_wait_pkt.append(wait_per_pkt)
+
+            # for pub in self.pub_list:
+            #    pub_write.append(pub.packets_sent)
+            for broker in self.broker_list:
+                broker_queue_size.append(broker.byte_size)
+                broker_output_bytes.append(broker.bytes_sent)
+
+            self.sub_waits.writerow(sub_wait)
+            self.sub_pkt.writerow(sub_pkt)
+            self.broker_queue.writerow(broker_queue_size)
+            self.broker_output.writerow(broker_output_bytes)
 
 
 class Network(object):
     # total_topic is TopicTree
-    def __init__(self, total_topic: tp.TopicTree, avg_sub_size, avg_pub_size, qlimit=None):
+    def __init__(self, total_topic: tp.TopicTree, avg_sub_size, avg_pub_size, sub_waits, sub_pkt, broker_queue, broker_output, qlimit=None):
 
         self.env = simpy.Environment()
         self.broker_list = []
@@ -445,6 +503,12 @@ class Network(object):
         self.avg_pub_size = avg_pub_size
         self.qlimit = qlimit
         self.edge_set = None
+        self.sub_waits = sub_waits
+        self.sub_pkt = sub_pkt
+        self.broker_queue = broker_queue
+        self.broker_output = broker_output
+
+        #self.timer = timeMonitor(self.env)
 
         # construct broker list
 
@@ -455,13 +519,14 @@ class Network(object):
 
         mdist = functools.partial(constarrival, monitor_rate)
 
+
         for i in range(len(broker_rates)):
             # sp id starts at sp1
             sp_id = 'sp' + str(i + 1)
             broker = SwitchPort(self.env, broker_rates[i], sp_id, qlimit=self.qlimit)
-            broker_monitor = PortMonitor(self.env, broker, mdist)
+            # broker_monitor = PortMonitor(self.env, broker, mdist)
             self.broker_list.append(broker)
-            self.broker_monitor_list.append(broker_monitor)
+            # self.broker_monitor_list.append(broker_monitor)
 
         # construct sub list
         sub_sdist = functools.partial(random.expovariate, 1 / self.avg_sub_size)
@@ -477,9 +542,9 @@ class Network(object):
             topic_list = self.total_topic.make_wild(topic_list)
             sub = Client(self.env, adist=sub_adist, sdist=sub_sdist, client_type='sub', client_id=sub_id,
                          topic_list=topic_list)
-            sub_monitor = ClientMonitor(self.env, sub, mdist)
+            # sub_monitor = ClientMonitor(self.env, sub, mdist)
             self.sub_list.append(sub)
-            self.sub_monitor_list.append(sub_monitor)
+            # self.sub_monitor_list.append(sub_monitor)
 
         # construct pub list
         pub_sdist = functools.partial(random.expovariate, 1 / self.avg_pub_size)
@@ -493,9 +558,32 @@ class Network(object):
             topic_list = self.total_topic.get_topic_within_distance(pub_num_topic[i], pub_diameter[i])
             pub = Client(self.env, adist=pub_adist, sdist=pub_sdist, client_type='pub', client_id=pub_id,
                          topic_list=topic_list)
-            pub_monitor = ClientMonitor(self.env, pub, mdist)
+            # pub_monitor = ClientMonitor(self.env, pub, mdist)
             self.pub_list.append(pub)
-            self.pub_monitor_list.append(pub_monitor)
+            # self.pub_monitor_list.append(pub_monitor)
+
+        broker_file_head = []
+        sub_file_head = []
+        pub_file_head = []
+
+        for broker in self.broker_list:
+            broker_file_head.append(broker.sp_id)
+        for sub in self.sub_list:
+            sub_file_head.append(sub.client_id)
+        for pub in self.pub_list:
+            pub_file_head.append(pub.client_id)
+
+        sub_writer_waits = csv.writer(self.sub_waits)
+        sub_writer_pkt = csv.writer(self.sub_pkt)
+        broker_writer_queue = csv.writer(self.broker_queue)
+        broker_writer_output = csv.writer(self.broker_output)
+
+        sub_writer_waits.writerow(sub_file_head)
+        sub_writer_pkt.writerow(sub_file_head)
+        broker_writer_queue.writerow(broker_file_head)
+        broker_writer_output.writerow(broker_file_head)
+
+        self.monitor = rowMonitor(self.env, self.sub_list, self.pub_list, self.broker_list, sub_writer_waits, sub_writer_pkt, broker_writer_queue, broker_writer_output, mdist)
 
     def establish_topology(self, seed=None):
 
@@ -506,6 +594,7 @@ class Network(object):
             broker2 = self.broker_list[id2 - 1]
             broker1.outs.append(broker2)
             broker2.outs.append(broker1)
+
     def connect_client(self, connection_style=None, seed=None):
 
         if seed is not None:
@@ -514,8 +603,8 @@ class Network(object):
         if connection_style is None:
             num_sub = len(self.sub_list)
             num_pub = len(self.pub_list)
-            sub_brokers = random.sample(self.broker_list, num_sub)
-            pub_brokers = random.sample(self.broker_list, num_pub)
+            sub_brokers = random.choices(self.broker_list, k=num_sub)
+            pub_brokers = random.choices(self.broker_list, k=num_pub)
             for i in range(num_sub):
                 self.sub_list[i].out = sub_brokers[i]
                 sub_brokers[i].outs.append(self.sub_list[i])
@@ -632,41 +721,52 @@ def get_edges(m, seed=None):
 
 
 if __name__ == '__main__':
-    mdist = functools.partial(constarrival, 2.5)
+    # network parameter
+    mode = 'PF'
+    num_broker = 10000
+    num_sub = 6000
+    num_pub = 2000
+    broker_r = 500
+    broker_rates = [broker_r] * num_broker
+    topic_dist = [10, 10, 5]
+    monitor_rate = 2
+    runtime = 20
+    connection_style = None
 
-    mean_pkt_size = 100.0  # in bytes
-    adist1 = functools.partial(random.expovariate, 2.5)
-    sdist = functools.partial(random.expovariate, 1.0 / mean_pkt_size)
-    port_rate = 3 * mean_pkt_size
-    samp_dist = functools.partial(random.expovariate, 0.50)
+    # sub parameter
+    avg_sub_size = 10.0
+    sub_r = 3
 
-    env = simpy.Environment()
-    sub1 = Client(env, client_type="sub", client_id="sub1", adist=adist1, sdist=sdist,
-                  topic_list=['t1', 't2', 't3', 't4'], debug=False)
-    pub1 = Client(env, client_type="pub", client_id="pub1", adist=adist1, sdist=sdist, topic_list=['t4', 't5'],
-                  debug=False)
-    switch_port1 = SwitchPort(env, port_rate, sp_id="sp1", debug=False)
-    switch_port2 = SwitchPort(env, port_rate, sp_id="sp2", debug=False)
+    sub_rates = [sub_r] * num_sub
+    sub_num_topic = [20] * num_sub
+    sub_diameter = [20] * num_sub
 
-    sub1.out = switch_port1
-    switch_port1.outs.append(sub1)
-    switch_port1.outs.append(switch_port2)
-    switch_port2.outs.append(switch_port1)
-    switch_port2.outs.append(pub1)
-    pub1.out = switch_port2
+    # pub parameter
+    avg_pub_size = 20.0
+    pub_r = 3
 
-    pm1 = PortMonitor(env, switch_port1, mdist)
-    pm2 = PortMonitor(env, switch_port2, mdist)
-    cm1 = ClientMonitor(env, sub1, mdist)
-    # print(switch_port1.outs[pub1])
+    pub_rates = [pub_r] * num_pub
+    pub_num_topic = [10] * num_pub
+    pub_diameter = [len(topic_dist) * 2] * num_pub
 
-    env.run(until=20)
+    seed = 1
 
-    print('sub1: ')
-    print(cm1.avg_waits)
+    sub_file = open('sub.csv', 'w')
+    pub_file = open('pub.csv', 'w')
+    broker_file = open('broker.csv', 'w')
 
-    print('pm1: ')
-    print(list(map(int, pm1.queue_size)))
+    SwitchPort.mode = mode
+    total_topic = tp.TopicTree()
+    total_topic.random_construct(topic_dist, seed)
+    # total_topic.visualize(total_topic.root)
+    net = Network(total_topic, avg_sub_size, avg_pub_size, sub_file, pub_file, broker_file)
+    net.initialize_nodes(broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic, pub_diameter,
+                         monitor_rate, seed)
+    net.establish_topology(seed)
+    net.connect_client(connection_style, seed)
+    net.env.run(runtime)
+    #print(SwitchPort.mode)
 
-    print('pm2: ')
-    print(list(map(int, pm2.queue_size)))
+    sub_file.close()
+    pub_file.close()
+    broker_file.close()
