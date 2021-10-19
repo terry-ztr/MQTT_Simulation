@@ -2,6 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="19e62fd6-0de6-439e-b453-98a63dd059b4" name="Default Changelist" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.ipynb_checkpoints/SF-checkpoint.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/.ipynb_checkpoints/SF-checkpoint.ipynb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/PF.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/PF.ipynb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/SF.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/SF.ipynb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/SSF.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/SSF.ipynb" afterDir="false" />
@@ -74,7 +76,10 @@
       <workItem from="1634172628142" duration="462000" />
       <workItem from="1634173178591" duration="20072000" />
       <workItem from="1634262540601" duration="1126000" />
-      <workItem from="1634264787679" duration="3637000" />
+      <workItem from="1634264787679" duration="4376000" />
+      <workItem from="1634287288118" duration="555000" />
+      <workItem from="1634529967799" duration="2675000" />
+      <workItem from="1634663479885" duration="506000" />
     </task>
     <servers />
   </component>

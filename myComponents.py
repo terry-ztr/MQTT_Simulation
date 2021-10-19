@@ -13,11 +13,7 @@ import os
 
 class Packet(object):
 
-    """ A very simple class that represents a packet.
-        This packet will run through a queue at a switch output port.
-        We use a float to represent the size of the packet in bytes so that
-        we can compare to ideal M/M/1 queues.
-
+    """
         Parameters
         ----------
         time : float
@@ -38,10 +34,8 @@ class Packet(object):
         self.size = size
         self.id = id
         self.src = src
-        # list of sp_id, travel path of the packet
         self.trace_last = None
         self.trace_second_last = None
-
         self.topic = topic
         # pkt_type: pub sub
         self.pkt_type = pkt_type
@@ -520,7 +514,7 @@ class Network(object):
 
         # construct broker list
 
-    def initialize_nodes(self, broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic, pub_diameter, monitor_rate, seed=None):
+    def initialize_nodes(self, broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic, pub_diameter, monitor_rate, client_life=None, seed=None):
 
         if seed is not None:
             random.seed(seed)
@@ -554,7 +548,7 @@ class Network(object):
             topic_list = self.total_topic.get_topic_within_distance(sub_num_topic[i], sub_diameter[i])
             topic_list = self.total_topic.make_wild(topic_list)
             sub = Client(self.env, adist=sub_adist, sdist=sub_sdist, client_type='sub', client_id=sub_id,
-                         topic_list=topic_list)
+                         topic_list=topic_list, finish=client_life)
             # sub_monitor = ClientMonitor(self.env, sub, mdist)
             self.sub_list.append(sub)
             # self.sub_monitor_list.append(sub_monitor)
@@ -572,7 +566,7 @@ class Network(object):
 
             topic_list = self.total_topic.get_topic_within_distance(pub_num_topic[i], pub_diameter[i])
             pub = Client(self.env, adist=pub_adist, sdist=pub_sdist, client_type='pub', client_id=pub_id,
-                         topic_list=topic_list)
+                         topic_list=topic_list, finish=client_life)
             # pub_monitor = ClientMonitor(self.env, pub, mdist)
             self.pub_list.append(pub)
             # self.pub_monitor_list.append(pub_monitor)
