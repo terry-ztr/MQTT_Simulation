@@ -119,6 +119,9 @@ class TopicTree(object):
         while len(topic_str_list) < num_topic and len(idx_list) > 0:
             idx = random.choice(idx_list)
             idx_list.remove(idx)
+            if(len(idx_list)==0):
+                print("1 unable to generate enough topic\n")
+                print("2 unable to generate enough topic\n")
             node_str = node_to_str(self.all_nodes[idx])
             conflict = False
             for topic_str in topic_str_list:

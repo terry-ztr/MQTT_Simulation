@@ -1,3 +1,5 @@
+## modifed based on https://www.grotto-networking.com/files/DESPython/SimComponents.py
+
 from collections import defaultdict
 import topic as tp
 import simpy
@@ -66,17 +68,20 @@ class Client(object):
                 the list of topics that the client will subscribe to or publish under
             debug : boolean
                 if true then the contents of each packet will be printed as it is received.
+            start : float
+                time client start to generate packet
             finish : float
-                lifetime of the client
+                time client stop to generate packet
 
         """
 
-    def __init__(self, env, adist, sdist, client_type, client_id, topic_list, finish=float("inf"), debug=False):
+    def __init__(self, env, adist, sdist, client_type, client_id, topic_list, start=0, finish=float("inf"), debug=False):
         self.client_id = client_id
         self.env = env
         # packet generator
         self.adist = adist
         self.sdist = sdist
+        self.start = start
         self.finish = finish
         self.out = None
         self.action = env.process(self.run())  # starts the run() method as a SimPy process
@@ -96,7 +101,8 @@ class Client(object):
     def run(self):
         """The generator function used in simulations.
         """
-        while self.env.now < self.finish:
+        yield self.env.timeout(self.start)
+        while self.finish > self.env.now:
             # wait for next transmission
             yield self.env.timeout(self.adist())
             topic = self.topic_list[random.randint(0, len(self.topic_list)) - 1]
@@ -141,7 +147,7 @@ class SwitchPort(object):
     mode = "PF"
     delay_unit = 500
 
-    def __init__(self, env, rate, sp_id, qlimit=None, limit_bytes=True, debug=False):
+    def __init__(self, env, rate, sp_id, prop_delay=0.01 ,qlimit=None, limit_bytes=True, debug=False):
         self.sp_id = sp_id
         self.store = simpy.Store(env)
         self.rate = rate
@@ -165,6 +171,7 @@ class SwitchPort(object):
 
         self.queueing_sub = 0  # sub in queue in bit
         self.queueing_pub = 0  # pub in queue in bit
+        self.prop_delay = prop_delay # propagation delay
 
     def run(self):
         while True:
@@ -194,6 +201,8 @@ class SwitchPort(object):
             outbound_delay = (time.time() - start_time) * SwitchPort.delay_unit
             yield self.env.timeout(outbound_delay)
             # print(outbound_delay)
+
+            yield self.env.timeout(self.prop_delay)
 
             self.busy = 0
 
@@ -235,8 +244,6 @@ class SwitchPort(object):
                         self.packets_sent += 1
                         self.bytes_sent += msg.size
                         # self.out_ports[out] += msg.size
-
-
             elif msg.pkt_type == 'pub':
                 target_nodes, match_branch_delay = self.topic_tree.match_branch(msg.topic)
                 outbound_delay += match_branch_delay
@@ -400,14 +407,6 @@ class PortMonitor(object):
             self.queue_size.append(self.port.byte_size)
             self.queue_length.append(len(self.port.store.items) + self.port.busy)
 
-            # port_value = list(self.port.out_ports.values())
-            # if self.last_monitored:
-            #    self.ports_sent.append(max(np.array(port_value)-np.array(self.last_monitored)))
-            #    self.last_monitored = port_value
-            # else:
-            #    self.ports_sent.append(max(port_value))
-            #    self.last_monitored = port_value
-
             # update input rate
             self.input_rate.append(self.port.bytes_rec / self.env.now)
 
@@ -488,7 +487,7 @@ class rowMonitor(object):
     def run(self):
         while True:
             yield self.env.timeout(self.dist())
-            if self.env.now % 5 == 0:
+            if self.env.now % 50 == 0:
                 print('current time: ', self.env.now)
             sub_wait = []
             sub_pkt = []
@@ -501,24 +500,13 @@ class rowMonitor(object):
             for sub in self.sub_list:
                 sub_wait.append(sub.waits)
                 sub_pkt.append(sub.packets_rec)
-                # interval_wait = sub.waits
-                # interval_pkt = sub.packets_rec
-                # if interval_pkt == 0:
-                #    wait_per_pkt = None
-                # else:
-                #    wait_per_pkt = interval_wait/interval_pkt
-                # sub_wait_pkt.append(wait_per_pkt)
 
-            # for pub in self.pub_list:
-            #    pub_write.append(pub.packets_sent)
             for broker in self.broker_list:
                 broker_queue_size.append(broker.byte_size)
                 broker_output_bytes.append(broker.bytes_sent)
                 sub_queue.append(broker.queueing_sub)
                 pub_queue.append(broker.queueing_pub)
-                # ports_sent = list(broker.out_ports.values())
-                # broker_highest_port.append(max(np.array(ports_sent)-np.array(broker.last_monitored_out)))
-                # broker.last_monitored_out = ports_sent
+
 
             self.sub_waits.writerow(sub_wait)
             self.sub_pkt.writerow(sub_pkt)
@@ -556,14 +544,13 @@ class Network(object):
         self.debug = debug
         self.queueing_sub = queueing_sub
         self.queueing_pub = queueing_pub
-        # self.highest_port = highest_port
 
-        # self.timer = timeMonitor(self.env)
 
         # construct broker list
 
     def initialize_nodes(self, broker_rates, sub_rates, sub_num_topic, sub_diameter, pub_rates, pub_num_topic,
-                         pub_diameter, monitor_rate, client_life=None, seed=None):
+                         pub_diameter, monitor_rate, sub_start=0, sub_end=float('inf'), pub_start=0, pub_end=float('inf'),
+                         prop_delay=0.01, seed=None):
 
         if seed is not None:
             random.seed(seed)
@@ -572,11 +559,11 @@ class Network(object):
 
         print('initializing brokers')
         for i in range(len(broker_rates)):
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print('broker_id: ', i + 1)
             # sp id starts at sp1
             sp_id = 'sp' + str(i + 1)
-            broker = SwitchPort(self.env, broker_rates[i], sp_id, qlimit=self.qlimit)
+            broker = SwitchPort(self.env, broker_rates[i], sp_id, prop_delay=prop_delay, qlimit=self.qlimit)
             self.broker_list.append(broker)
             if self.debug:
                 broker_monitor = PortMonitor(self.env, broker, mdist)
@@ -586,19 +573,16 @@ class Network(object):
         print('initializing sub')
         sub_sdist = functools.partial(random.expovariate, 1 / self.avg_sub_size)
         for i in range(len(sub_rates)):
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print('sub_id: ', i + 1)
             # sub id starts at sub1
             sub_id = 'sub' + str(i + 1)
             sub_adist = functools.partial(random.expovariate, sub_rates[i])
             # set subscriber interested topic
-            # num_topic = random.randint(1, len(self.total_topic))
-            # topic_list = random.sample(self.total_topic, num_topic)
-
             topic_list = self.total_topic.get_topic_within_distance(sub_num_topic[i], sub_diameter[i])
             topic_list = self.total_topic.make_wild(topic_list)
             sub = Client(self.env, adist=sub_adist, sdist=sub_sdist, client_type='sub', client_id=sub_id,
-                         topic_list=topic_list, finish=client_life)
+                         topic_list=topic_list, start=sub_start, finish=sub_end)
             self.sub_list.append(sub)
 
             if self.debug:
@@ -608,17 +592,14 @@ class Network(object):
         # construct pub list
         pub_sdist = functools.partial(random.expovariate, 1 / self.avg_pub_size)
         for i in range(len(pub_rates)):
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print('pub_id: ', i + 1)
             pub_id = 'pub' + str(i + 1)
             pub_adist = functools.partial(random.expovariate, pub_rates[i])
             # set publisher interested topic
-            # num_topic = random.randint(1, len(self.total_topic))
-            # topic_list = random.sample(self.total_topic, num_topic)
-
             topic_list = self.total_topic.get_topic_within_distance(pub_num_topic[i], pub_diameter[i])
             pub = Client(self.env, adist=pub_adist, sdist=pub_sdist, client_type='pub', client_id=pub_id,
-                         topic_list=topic_list, finish=client_life)
+                         topic_list=topic_list, start=pub_start, finish=pub_end)
 
             self.pub_list.append(pub)
             if self.debug:
@@ -652,7 +633,6 @@ class Network(object):
 
         broker_sub.writerow(broker_file_head)
         broker_pub.writerow(broker_file_head)
-        # highest_port.writerow(broker_file_head)
 
         self.monitor = rowMonitor(self.env, self.sub_list, self.pub_list, self.broker_list, sub_writer_waits,
                                   sub_writer_pkt, broker_writer_queue, broker_writer_output, broker_sub, broker_pub,
@@ -666,9 +646,7 @@ class Network(object):
             broker1 = self.broker_list[id1 - 1]
             broker2 = self.broker_list[id2 - 1]
             broker1.outs.append(broker2)
-            # broker1.out_ports[broker2] = 0
             broker2.outs.append(broker1)
-            # broker2.out_ports[broker1] = 0
 
     def connect_client(self, connection_style=None, seed=None):
 
